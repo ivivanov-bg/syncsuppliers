@@ -34,8 +34,8 @@ DATA_FEED="https://bright-toys.com/Products_stock_price.xml"
 SUPPLIER_ID=5
 LOG_FILE="/mnt/f/prj/smehurko.com/public_html/log/product_sync_brightToys.log"
 
-
-
 curl -s -k -L -b cookies.txt -X POST -F "log_lvl=${LOG_LVL}" -F "feed_url=${DATA_FEED}" -F "supplier=${SUPPLIER_ID}" "${SYNC_URL}" > /dev/null
+
+rm -f cookies.txt
      
 cat ${LOG_FILE}
