@@ -432,7 +432,7 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 	        array_push($result['sync_prd_image_links'], $ProductImage->ImagePath);
 	    }
 	    
-	    $result['sync_prd_insert_allowed']           = true;
+	    $result['sync_prd_insert_allowed']           = false;
 	    
 	    //AdminSyncSuppliersController::getManufacturerIdByName($result['sync_prd_manufacturer_name'], $logger);
 	    //return false;
@@ -527,7 +527,7 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 	    //	            $result['sync_prd_description_en']    = (string) ($sync_prd_xml_node->xpath('characteristics/characteristic[@externalCode="231"]')[0]);
 	    //	            $result['sync_prd_name_en']           = (string) ($sync_prd_xml_node->xpath('characteristics/characteristic[@externalCode=233]')[0]);
 	    
-	    $result['sync_prd_insert_allowed']           = true;
+	    $result['sync_prd_insert_allowed']           = false;
 	    
 	    //AdminSyncSuppliersController::getManufacturerIdByName($result['sync_prd_manufacturer_name'], $logger);
 	    //return false;
