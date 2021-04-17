@@ -125,6 +125,7 @@ class AdminSyncSuppliersController extends ModuleAdminController {
             case 4:
                 $xpath_products = '//df:Product';
                 $log_filename  = _PS_ROOT_DIR_.'/log/product_sync_mouseToys.log';
+                break;
             case 5:
                 $xpath_products = '//product';
                 $log_filename  = _PS_ROOT_DIR_.'/log/product_sync_brightToys.log';
