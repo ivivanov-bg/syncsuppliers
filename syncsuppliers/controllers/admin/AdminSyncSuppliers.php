@@ -105,226 +105,441 @@ class AdminSyncSuppliersController extends ModuleAdminController {
     }
 
 	public function postProcess()
-	{
-	    //print_r($xml_data);
+	{	    
+	    $xml_feed_url = Tools::getValue('feed_url');
+	    $id_supplier = Tools::getValue('supplier');
+	    $log_lvl = Tools::getValue('log_lvl');
+	    
+        if (Tools::isSubmit('syncMoni')) {
+            $id_supplier   = 2;
+            
+        } else if (Tools::isSubmit('syncMouseToys')) {
+            $id_supplier   = 4;
+        }
+        
+        switch($id_supplier) {
+            case 2: // Moni
+                $xpath_products = '//product';
+                $log_filename  = _PS_ROOT_DIR_.'/log/product_sync_moni.log';
+                break;
+            case 4:
+                $xpath_products = '//df:Product';
+                $log_filename  = _PS_ROOT_DIR_.'/log/product_sync_mouseToys.log';
+            case 5:
+                $xpath_products = '//product';
+                $log_filename  = _PS_ROOT_DIR_.'/log/product_sync_brightToys.log';
+                break;
+            default:
+                return;
+        }
+        
+        $this->syncProducts($id_supplier, $xml_feed_url, $xpath_products, $log_filename, $log_lvl);
+	}
+	
+	protected function syncProducts($id_supplier, $xml_feed_url, $xpath_products, $log_filename, $log_debug_lvl = 1) {
+	    
+	    $id_lang = (int) Configuration::get('PS_LANG_DEFAULT');
+	    
+	    $logger = new FileLogger($log_debug_lvl);
+	    $logger->setFilename($log_filename);
+	    
+	    $logger->logInfo('Starting Sync for id_supplier = '.$id_supplier.', src = "'. $xml_feed_url .'"');
+	    
+	    $ch = curl_init();
+	    curl_setopt($ch, CURLOPT_URL, $xml_feed_url);
+	    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1); 
+	    
+	    $xml_data_str = curl_exec($ch);
+	    
+	    curl_close($ch); 
+	    
+	    $xml_data = $this->prepareXmlObject($xml_data_str, $logger);
+	    
+	    $sync_products = $xml_data->xpath($xpath_products);
+	    $sync_products_cnt = count($sync_products);
+	    
+	    $logger->logInfo('Products to sync: '. $sync_products_cnt . ' for selector "' . $xpath_products . '"');
+	    
+	    $products = SupplierCore::getProducts($id_supplier, $id_lang, 1000000, 1);
+	    
+	    $I = 0; $U = 0; $D = 0; $K = 0;
+	    foreach ($sync_products as $key => $sync_prd) {
+	        
+	        $sync_prd_fields = $this->getFieldsBySupplier($id_supplier, $sync_prd, $logger);
+	        
+	        if (!$sync_prd_fields) {
+	            $logger->logWarning('Skipping ' . ($key + 1) . ' of ' . $sync_products_cnt);
+	            continue;
+	        }
+	        
+	        if (isset($products[$sync_prd_fields['sync_prd_ref_key']])) {
+	            $current_product = $products[$sync_prd_fields['sync_prd_ref_key']];
+	        } else {
+	            $current_product = null;
+	        }
+	        
+	        if ($current_product == null && !$sync_prd_fields['sync_prd_insert_allowed']) {
+	            $logger->logInfo('Skipping ' . ($key + 1) . ' of ' . $sync_products_cnt . ($current_product != null ? ': ' : ': (NEW) ') . $sync_prd_fields['sync_prd_ref'] . ' ' . $sync_prd_fields['sync_prd_name_bg']);
+	            continue;
+	        }
+	        
+	        $logger->logDebug('Processing ' . ($key + 1) . ' of ' . $sync_products_cnt . ($current_product != null ? ': ' : ': (NEW) ') . $sync_prd_fields['sync_prd_ref'] . ' ' . $sync_prd_fields['sync_prd_name']);
+	        
+	        $sync_prd_result = $this->processSyncProduct($id_supplier, $sync_prd_fields, $current_product, $logger);
+	        
+	        if (!$sync_prd_result) {
+	            $logger->logError('Failed syncing product ' . $sync_prd_fields['sync_prd_ref']. ' ' . $sync_prd_fields['sync_prd_name']);
+	        } else {
+	            switch ($sync_prd_result) {
+	                case 'I': // Inserted
+	                    $I++;
+	                    break;
+	                case 'U': // Updated
+	                    $U++;
+	                    break;
+	                case 'K': // Kept
+	                    $K++;
+	                    break;
+	                case 'D': // Deleted
+	                    $D++;
+	                    break;
+	                default:
+	                    $logger->logWarning('Unknown sync result "' . $sync_prd_result .'"');
+	                    break;
+	            }
+	        }
+	    }
+	    
+	    $this->submit_result = $id_supplier . ':I=' . $I . ':U=' . $U . ':D=' . $D . ':K=' . $K;
+	    $this->submit_result_data = '';
+	    $logger->logInfo($this->submit_result);
+	}
+	
+	protected function prepareXmlObject($xml_data_str, $logger) {
+	    $xml_data = simplexml_load_string($xml_data_str);
+	    
+	    if (!$xml_data) {
+	        $logger->logError('Failed loading file "'. $xml_data_str . '"');
+	    }
+	    
+	    $logger->logDebug('Found '. count($xml_data) . ' Nodes in XML.');
+	    
+	    foreach ($xml_data->getNamespaces(true) as $key => $value) {
+	        if (!$key) {
+	            $key = 'df';
+	        }
+	        
+	        $logger->logInfo('Found XML schema: "'. $key . '=' . $value .'"');
+	        $xml_data->registerXPathNamespace($key, $value);
+	    }
+	    
+	    return $xml_data;
+	}
+	
+	protected function processSyncProduct($id_supplier, $sync_prd_fields, $current_product, $logger) {
+	    
+	    $result = false;
+	    
 	    $id_lang = (int) Configuration::get('PS_LANG_DEFAULT');
 	    $id_shop = (int)$this->context->shop->id;
 	    
-	    $feedUrl = Tools::getValue('feed_url');
-	    
-	    // F:\\prj\\smehurko.com\\prestashop_modules\\syncsuppliers\\testData\\dataExport_partial.xml
-	    
-        if (Tools::isSubmit('syncMoni')) {
-            $strFileName = addslashes($feedUrl);
-            $xml_data_file = fopen($strFileName, 'r');
-            $xml_data_str = fread($xml_data_file, filesize($strFileName));
-            fclose($xml_data_file);
+        if ($current_product != null) {
+            // Update existing product
+            // Price, Availability
             
-            $logger = new FileLogger(1); //0 == debug level, logDebug() won’t work without this.
-            $logger->setFilename(_PS_ROOT_DIR_.'/log/product_sync_moni_' . date('Y-m-d') . '.log');
+            $isUpdated = false;
             
-            $xml_data = simplexml_load_string($xml_data_str);
+            // update price and availability
+            $p = new Product($current_product['id_product'], true, $id_lang);
             
-            $logger->logInfo('Start processing: '. count($xml_data) . ' products in XML.');
+            $prd_price = (double) $p->price;
+            $prd_quantity = (int) $p->quantity;
             
-            $products = SupplierCore::getProducts(2, $id_lang, 1000000, 1);
-
-            $I = 0;
-            $U = 0;
-            $D = 0;
-            $K = 0;
+            if ($prd_price != $sync_prd_fields['sync_prd_price']) {
+                $logger->logDebug('Updated price from ' . $prd_price . ' to ' . $sync_prd_fields['sync_prd_price']);
+                $p->price = $sync_prd_fields['sync_prd_price'];
+                $isUpdated = true;
+            }
             
-            foreach ($xml_data->product as $supplier_product) {
+            if($prd_quantity != $sync_prd_fields['sync_prd_quantity']) {
+                $logger->logDebug('Updated quantity from ' . $prd_quantity . ' to ' . $sync_prd_fields['sync_prd_quantity']);
+                StockAvailable::setQuantity($p->id, null, $sync_prd_fields['sync_prd_quantity']);
+                $isUpdated = true;
+            }
+            
+            if ($isUpdated) {
+                $result = 'U';
+                $p->save();
+            } else {
+                $result = 'K';
+            }
+        } else {
+            $p = new Product(0, false);
+            
+            $p->id_supplier         = $id_supplier;
+            $p->supplier_reference  = $sync_prd_fields['sync_prd_ref'];
+            $p->price               = $sync_prd_fields['sync_prd_price'];
+            $p->quantity            = $sync_prd_fields['sync_prd_quantity'];
+            $p->id_category_default = 2;
+            $p->id_manufacturer     = AdminSyncSuppliersController::getManufacturerIdByName($sync_prd_fields['sync_prd_manufacturer_name'], $logger);
+            
+            $p->name[2]             = $sync_prd_fields['sync_prd_name_bg'];
+            $p->link_rewrite[2]     = Tools::str2url($sync_prd_fields['sync_prd_name_bg']);
+            $p->description[2]      = $sync_prd_fields['sync_prd_description_bg'];
+            $p->description[1]      = $sync_prd_fields['sync_prd_description_en'];
+            
+            $p->save();
+            
+            $p->updateCategories(array(2));
+            $p->addSupplierReference($id_supplier, 0, $sync_prd_fields['sync_prd_ref']);
+            $p->setAdvancedStockManagement(1);
+            StockAvailable::setQuantity($p->id, null, $sync_prd_fields['sync_prd_quantity']);
+            
+            
+            $has_cover = false;
+            
+            foreach ($sync_prd_fields['sync_prd_image_links'] as $image_link) {
+                $url = (string) $image_link;
                 
-                // Get suplier properties 
-                $supplier_reference = (string) $supplier_product->internet_code;
-                
-                if(!$supplier_reference) {
-                    $supplier_reference = (string) $supplier_product->code;
+                if (substr( $url, 0, 4 ) !== "http") {
+                    $url = 'http://'.$url;
                 }
                 
-                if(!$supplier_reference) {
-                    $supplier_reference = (string) $supplier_product->barcode;
-                }
-                
-                if(!$supplier_reference) {
-                    $logger->logWarning('Missing internet_code for: ' . $supplier_product->name);
-                    continue;
+                $image = new Image();
+                $image->id_product = $p->id;
+                $image->position = ImageCore::getHighestPosition($p->id) + 1;
+                if ($has_cover) {
+                    $image->cover = false;
                 } else {
-                    $supplier_reference = trim($supplier_reference);
+                    $has_cover = true;
+                    $image->cover = true;
                 }
                 
-                $supplier_price = (double) $supplier_product->retail_price_with_vat;
-                $supplier_availability = (string) $supplier_product->availability;
-                $supplier_name = (string) $supplier_product->name;
-                
-                $supplier_quantity = 99;
-                switch($supplier_availability) {
-                    case 'In stock':
-                        $supplier_quantity = 99;
-                        break;
-                    case 'Low Quantity':
-                        $supplier_quantity = 5;
-                        break;
-                    case 'Out of stock':
-                        $supplier_quantity = 0;
-                        break;
-                    default:
-                        $supplier_quantity = 3;
-                        break;
-                }
-                // ========================
-                
-                $key = 'sr_'.$supplier_reference;
-                
-                if (isset($products[$key])) {
-                    $current_product = $products[$key];
-                } else {
-                    $current_product = null;
-                }
-                
-                $logger->logDebug('Processing ' . $key . ' ' . ($current_product != null ? 'E' : 'N'));
-                
-                if ($current_product != null) { 
-                    // Update existing product
-                    // Price, Availability
-                    
-                    $isUpdated = false;
-                    
-                    // update price and availability
-                    $p = new Product($current_product['id_product'], true, $id_lang);
-
-                    $current_price = (double) $p->price;
-                    $current_quantity = (int) $p->quantity;
-
-                    if ($current_price != $supplier_price) {
-                        $logger->logDebug('Updated price from ' . $current_price . ' to ' . $supplier_price);
-                        $p->price = $supplier_price;
-                        $isUpdated = true;
+                if (($image->validateFields(false, true)) === true &&
+                    ($image->validateFieldsLang(false, true)) === true && $image->add())
+                {
+                    $image->associateTo($id_shop);
+                    if (!AdminImportController::copyImg($p->id, $image->id, $url, 'products', false))
+                    {
+                        $image->delete();
                     }
-                    
-                    if($current_quantity != $supplier_quantity) {
-                        $logger->logDebug('Updated quantity from ' . $current_quantity . ' to ' . $supplier_quantity);
-                        StockAvailable::setQuantity($p->id, null, $supplier_availability);
-                        $isUpdated = true;
-                    }
-                    
-                    AdminSyncSuppliersController::getManufacturerIdByName($supplier_product->brand, $logger);
-                    
-                    if ($isUpdated) {
-                        $U++;
-                        $p->save();
-                    } else {
-                        $K++;
-                    }
-                } else { // Add new product
-                    $p = new Product(0, false);
-
-                    $p->id_supplier         = 2;
-                    $p->supplier_reference  = $supplier_reference;
-                    $p->price               = $supplier_price;
-                    $p->quantity            = $supplier_quantity;
-                    $p->id_category_default = 2;
-                    $p->id_manufacturer     = AdminSyncSuppliersController::getManufacturerIdByName($supplier_product->brand, $logger);
-                    
-                    $p->name[2]             = $supplier_name;
-                    $p->link_rewrite[2]     = Tools::str2url($supplier_name);
-                    $p->description[2]      = (string) $supplier_product->description;
-                    
-                    foreach ($supplier_product->characteristics->characteristic as $chr) {
-                        switch($chr['externalCode']) {
-                            case 202: // Îïàêîâêà Â/cm
-                                break;
-                            case 203: // Îïàêîâêà Ø/cm
-                                break;
-                            case 210: // Îïàêîâêà Ä/cm
-                                break;
-                            case 213: // Ïðîäóêò Ä/cm
-                                break;
-                            case 216: // Ïðîäóêò Ø/cm
-                                break;
-                            case 225: // NW /kgs
-                                break;
-                            case 231: // Îïèñàíèå íà àíãëèéñêè
-                                $p->description[1] = $chr;
-                                break;
-                            case 233: // ÍÀÈÌÅÍÎÂÀÍÈÅ ÍÀ ÀÍÃËÈÉÑÊÈ
-                                //$p->name[1] = $chr;
-                                //$p->link_rewrite[1] = Tools::str2url($chr);
-                                break;
-                            case 235: // Ðàçìåð íà ïðîäóêòà
-                                break;
-                            case 236: // Ðàçìåð íà êàøîíà
-                                break;
-                            case 251: // ÈÍÑÒÐÓÊÖÈÈ
-                                break;
-                            case 252: // Ïðîäóêò Â/cm
-                                break;
-                            case 360: // Âèäåî ìàòåðèàë
-                                break;
-                            default:
-                                $logger->logWarning('Unknown characteristic => case ' . $chr['externalCode'] . ': // ' . $chr['Name']);
-                                break;
-                        }
-                    }
-                    
-                    $p->save();
-                    
-                    $p->updateCategories(array(2));
-                    $p->addSupplierReference(2, 0, $supplier_reference);
-                    $p->setAdvancedStockManagement(1);
-                    StockAvailable::setQuantity($p->id, null, $supplier_quantity);
-                    
-                    
-                    $has_cover = false;
-                    foreach ($supplier_product->image_link as $image_link) {
-                        $url = 'http://' . $image_link;
-                        
-                        $image = new Image();
-                        $image->id_product = $p->id;
-                        $image->position = ImageCore::getHighestPosition($p->id) + 1;
-                        if ($has_cover) {
-                            $image->cover = false;
-                        } else {
-                            $has_cover = true;
-                            $image->cover = true;
-                        }
-                        
-                        if (($image->validateFields(false, true)) === true &&
-                            ($image->validateFieldsLang(false, true)) === true && $image->add())
-                        {
-                            $image->associateTo($id_shop);
-                            if (!AdminImportController::copyImg($p->id, $image->id, $url, 'products', false))
-                            {
-                                $image->delete();
-                            }
-                        }
-                    }
-                    
-                    
-                    $I++;
-                    $p->save();
                 }
             }
             
-            $this->submit_result = 'syncMoni:I=' . $I . ':U=' . $U . ':D=' . $D . ':K=' . $K;
-            $this->submit_result_data = '';
-            $logger->logInfo($this->submit_result);
+            $p->save();
+            $result = 'I';
         }
-
-        if (Tools::isSubmit('syncMouseToys')) {
-            $f = fopen('php://output', 'w');
-            fputcsv($f, array("syncMouseToys", $feedUrl), ";", '"');
-            fclose($f);
-            die();
-        }
-
+	    
+	    return $result;
+	}
+	
+	protected function getFieldsBySupplier($id_supplier, $sync_prd_xml_node, $logger) {
+	    $result = null;
+	    
+	    switch($id_supplier) {
+	        case 2: // Moni
+	            $result = $this->getFieldsForMoni($sync_prd_xml_node, $logger);
+	            break;
+	        case 4: // Mouse Toys
+	            $result =  $this->getFieldsForMouseToys($sync_prd_xml_node, $logger);
+	            break;
+	        case 5: // Bright Toys
+	            $result =  $this->getFieldsForBrightToys($sync_prd_xml_node, $logger);
+	            break;
+	        default:
+	            $logger->logWarning('Unknown supplier id "'. $id_supplier . '"');
+	            $result =  false;
+	    }
+	    
+	    return $result;
+	}
+	
+	protected function getFieldsForBrightToys($sync_prd_xml_node, $logger) {
+	    $result = array();
+	    
+	    $result['sync_prd_name_bg']           = (string) $sync_prd_xml_node->Name;
+	    $result['sync_prd_ref']               = (string) $sync_prd_xml_node->Reference;
+	    
+	    if(!$result['sync_prd_ref']) {
+	        $result['sync_prd_ref']           = (string) $sync_prd_xml_node->EAN;
+	    }
+	    
+	    if(!$result['sync_prd_ref']) {
+	        $logger->logWarning('Missing ProductCode for: ' . $result['sync_prd_name_bg']);
+	        return false;
+	    }
+	    
+	    $result['sync_prd_ref']               = (string) trim($result['sync_prd_ref']);
+	    $result['sync_prd_ref_key']           = (string) 'sr_'.$result['sync_prd_ref'];
+	    
+	    $result['sync_prd_price']             = (double) $sync_prd_xml_node->RRP;
+	    $result['sync_prd_quantity']          = (string) $sync_prd_xml_node->Quantity;
+	    $result['sync_prd_manufacturer_name'] = (string) $sync_prd_xml_node->Brand;
+	    $result['sync_prd_description_bg']    = null;
+	    $result['sync_prd_description_en']    = null;
+	    $result['sync_prd_image_links']       = array();
+	    
+	    $result['sync_prd_insert_allowed']           = false;
+	    
+	    //AdminSyncSuppliersController::getManufacturerIdByName($result['sync_prd_manufacturer_name'], $logger);
+	    //return false;
+	    
+	    return $result;
+	}
+	
+	protected function getFieldsForMouseToys($sync_prd_xml_node, $logger) {
+	    $result = array();
+	    
+	    $result['sync_prd_name_bg']           = (string) $sync_prd_xml_node->ProductName->BG;
+	    $result['sync_prd_ref']               = (string) $sync_prd_xml_node->ProductCode;
+	    
+	    if(!$result['sync_prd_ref']) {
+	        $result['sync_prd_ref']           = (string) $sync_prd_xml_node->ProductID;
+	    }
+	    
+	    if(!$result['sync_prd_ref']) {
+	        $logger->logWarning('Missing ProductCode for: ' . $result['sync_prd_name_bg']);
+	        return false;
+	    }
+	    
+	    $result['sync_prd_ref']               = (string) trim($result['sync_prd_ref']);
+	    $result['sync_prd_ref_key']           = (string) 'sr_'.$result['sync_prd_ref'];
+	    $result['sync_prd_price']             = (double) $sync_prd_xml_node->ProductPrice;
+	    $result['sync_prd_availability']      = (string) $sync_prd_xml_node->AvailabilityLabel;
+	    
+	    switch($result['sync_prd_availability']) {
+	        case 'Ð’ ÐÐÐ›Ð˜Ð§ÐÐžÐ¡Ð¢':
+	            $result['sync_prd_quantity'] = 99;
+	            break;
+	        case 'Low Quantity':
+	            $result['sync_prd_quantity'] = 5;
+	            break;
+	        case 'Out of stock':
+	            $result['sync_prd_quantity'] = 0;
+	            break;
+	        default:
+	            $result['sync_prd_quantity'] = 3;
+	            $logger->logWarning('Unknown sync_prd_availability "'. $result['sync_prd_availability'] . '"');
+	            break;
+	    }
+	    
+	    $result['sync_prd_manufacturer_name'] = (string) $sync_prd_xml_node->BrandName->BG;
+	    $result['sync_prd_description_bg']    = (string) $sync_prd_xml_node->ProductDetailedDescription;
+	    $result['sync_prd_description_en']    = null;
+	    
+	    $result['sync_prd_image_links'] = array();
+	    foreach ($sync_prd_xml_node->ProductImages->ProductImage as $ProductImage) {
+	        array_push($result['sync_prd_image_links'], $ProductImage->ImagePath);
+	    }
+	    
+	    $result['sync_prd_insert_allowed']           = true;
+	    
+	    //AdminSyncSuppliersController::getManufacturerIdByName($result['sync_prd_manufacturer_name'], $logger);
+	    //return false;
+	    
+	    return $result;
+	}
+	
+	protected function getFieldsForMoni($sync_prd_xml_node, $logger) {
+	    $result = array();
+	    
+	    $result['sync_prd_name_bg']           = (string) $sync_prd_xml_node->name;
+	    $result['sync_prd_ref']               = (string) $sync_prd_xml_node->internet_code;
+	    
+	    if(!$result['sync_prd_ref']) {
+	        $result['sync_prd_ref']           = (string) $sync_prd_xml_node->code;
+	    }
+	    
+	    if(!$result['sync_prd_ref']) {
+	        $result['sync_prd_ref']           = (string) $sync_prd_xml_node->barcode;
+	    }
+	    
+	    if(!$result['sync_prd_ref']) {
+	        $logger->logWarning('Missing internet_code for: ' . $result['sync_prd_name_bg']);
+	        return false;
+	    } else {
+	        $result['sync_prd_ref']           = trim($result['sync_prd_ref']);
+	    }
+	    
+	    $result['sync_prd_ref_key']           = (string) 'sr_'.$result['sync_prd_ref'];
+	    $result['sync_prd_price']             = (double) $sync_prd_xml_node->retail_price_with_vat;
+	    $result['sync_prd_availability']      = (string) $sync_prd_xml_node->availability;
+	    
+	    switch($result['sync_prd_availability']) {
+	        case 'In stock':
+	            $result['sync_prd_quantity'] = 99;
+	            break;
+	        case 'Low Quantity':
+	            $result['sync_prd_quantity'] = 5;
+	            break;
+	        case 'Out of stock':
+	            $result['sync_prd_quantity'] = 0;
+	            break;
+	        default:
+	            $result['sync_prd_quantity'] = 3;
+	            $logger->logWarning('Unknown sync_prd_availability "'. $result['sync_prd_availability'] . '"');
+	            break;
+	    }
+	    
+	    $result['sync_prd_manufacturer_name'] = (string) $sync_prd_xml_node->brand;
+	    $result['sync_prd_description_bg']    = (string) $sync_prd_xml_node->description;
+	    $result['sync_prd_image_links']       =          $sync_prd_xml_node->image_link;
+	    $result['sync_prd_description_en']    = null;
+	    
+	    foreach ($sync_prd_xml_node->characteristics->characteristic as $chr) {
+	        switch($chr['externalCode']) {
+	            case 202: // ÐžÐ¿Ð°ÐºÐ¾Ð²ÐºÐ° Ð’/cm
+	                break;
+	            case 203: // ÐžÐ¿Ð°ÐºÐ¾Ð²ÐºÐ° Ð¨/cm
+	                break;
+	            case 210: // ÐžÐ¿Ð°ÐºÐ¾Ð²ÐºÐ° Ð”/cm
+	                break;
+	            case 213: // ÐŸÑ€Ð¾Ð´ÑƒÐºÑ‚ Ð”/cm
+	                break;
+	            case 216: // ÐŸÑ€Ð¾Ð´ÑƒÐºÑ‚ Ð¨/cm
+	                break;
+	            case 225: // NW /kgs
+	                break;
+	            case 231: // ÐžÐ¿Ð¸ÑÐ°Ð½Ð¸Ðµ Ð½Ð° Ð°Ð½Ð³Ð»Ð¸Ð¹ÑÐºÐ¸
+	                $result['sync_prd_description_en'] = (string) $chr;
+	                break;
+	            case 233: // ÐÐÐ˜ÐœÐ•ÐÐžÐ’ÐÐÐ˜Ð• ÐÐ ÐÐÐ“Ð›Ð˜Ð™Ð¡ÐšÐ˜
+	                $result['sync_prd_name_en'] = (string) $chr;
+	                //$p->name[1] = $chr;
+	                //$p->link_rewrite[1] = Tools::str2url($chr);
+	                break;
+	            case 235: // Ð Ð°Ð·Ð¼ÐµÑ€ Ð½Ð° Ð¿Ñ€Ð¾Ð´ÑƒÐºÑ‚Ð°
+	                break;
+	            case 236: // Ð Ð°Ð·Ð¼ÐµÑ€ Ð½Ð° ÐºÐ°ÑˆÐ¾Ð½Ð°
+	                break;
+	            case 251: // Ð˜ÐÐ¡Ð¢Ð Ð£ÐšÐ¦Ð˜Ð˜
+	                break;
+	            case 252: // ÐŸÑ€Ð¾Ð´ÑƒÐºÑ‚ Ð’/cm
+	                break;
+	            case 360: // Ð’Ð¸Ð´ÐµÐ¾ Ð¼Ð°Ñ‚ÐµÑ€Ð¸Ð°Ð»
+	                break;
+	            default:
+	                $logger->logWarning('Unknown characteristic => case ' . $chr['externalCode'] . ': // ' . $chr['Name']);
+	                break;
+	        }
+	    }
+	    
+	    //	            $result['sync_prd_description_en']    = (string) ($sync_prd_xml_node->xpath('characteristics/characteristic[@externalCode="231"]')[0]);
+	    //	            $result['sync_prd_name_en']           = (string) ($sync_prd_xml_node->xpath('characteristics/characteristic[@externalCode=233]')[0]);
+	    
+	    $result['sync_prd_insert_allowed']           = true;
+	    
+	    //AdminSyncSuppliersController::getManufacturerIdByName($result['sync_prd_manufacturer_name'], $logger);
+	    //return false;
+	    
+	    return $result;
 	}
 	
 	public static function getManufacturerIdByName($name, $logger)
 	{
 	    $name = trim($name);
 	    if (strlen($name) == 0) {
+	        $logger->logError('Manufacturer name not provided ' . $name);
 	        return null;
 	    }
 	    
