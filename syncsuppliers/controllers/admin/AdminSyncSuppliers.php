@@ -161,7 +161,10 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 	    
 	    $logger->logInfo('Products to sync: '. $sync_products_cnt . ' for selector "' . $xpath_products . '"');
 	    
-	    $products = SupplierCore::getProducts($id_supplier, $id_lang, 1000000, 1);
+	    $products = Supplier::getProducts($id_supplier, $id_lang, 1000000, 1);
+	    $products_cnt = count($products);
+	    
+	    $logger->logInfo("Products in database: ". $products_cnt . " for supplier " . $id_supplier . " with 'supplier_reference'");
 	    
 	    $I = 0; $U = 0; $D = 0; $K = 0;
 	    foreach ($sync_products as $key => $sync_prd) {
