@@ -37,7 +37,7 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 
 	public function renderView()
 	{
-		$products = Supplier::getProducts(1, $this->id_lang, 1000000, 1);
+		$products = Supplier::getProductsForSync(1, $this->id_lang, 1000000, 1);
 		
 		$logger = new FileLoggerCore(0);
 		$logger->setFilename(_PS_ROOT_DIR_.'/log/product_debug.log');
@@ -185,7 +185,7 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		
 		$logger->logInfo('Products to sync: '. $sync_products_cnt . ' for selector "' . $xpath_products . '"');
 		
-		$products = Supplier::getProducts($id_supplier, $this->id_lang, 1000000, 1);
+		$products = Supplier::getProductsForSync($id_supplier, $this->id_lang, 1000000, 1);
 		$products_cnt = count($products);
 		
 		$logger->logInfo("Products in database: ". $products_cnt . " for supplier " . $id_supplier . " with 'supplier_reference'");
@@ -195,8 +195,11 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 			
 			$sync_prd_fields = $this->getFieldsBySupplier($id_supplier, $sync_prd, $logger);
 			
-			if (!$sync_prd_fields) {
-				$logger->logWarning('Skipping ' . ($key + 1) . ' of ' . $sync_products_cnt);
+			if (!$sync_prd_fields['status']) {
+				$logger->logWarning('Skipping ' . ($key + 1) . ' of ' . $sync_products_cnt . ': ' . $sync_prd_fields['status_msg']);
+				continue;
+			} else if (!$sync_prd_fields) {
+				$logger->logWarning('Skipping ' . ($key + 1) . ' of ' . $sync_products_cnt . ': Product fields are empty');
 				continue;
 			}
 			
@@ -207,14 +210,12 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 			}
 			
 			if ($current_product == null && !$sync_prd_fields['sync_prd_insert_allowed']) {
-				$logger->logInfo('Skipping ' . ($key + 1) . ' of ' . $sync_products_cnt . ($current_product != null ? ': ' : ': (NEW) ') . $sync_prd_fields['sync_prd_ref'] . ' ' . $sync_prd_fields['sync_prd_name_bg']);
+				$logger->logDebug('Skipping ' . ($key + 1) . ' of ' . $sync_products_cnt . ($current_product != null ? ': ' : ': (NEW) ') . $sync_prd_fields['sync_prd_ref'] . ' ' . $sync_prd_fields['sync_prd_name_bg']);
 				continue;
 			}
-			
-			$logger->logDebug('Processing ' . ($key + 1) . ' of ' . $sync_products_cnt . ($current_product != null ? ': ' : ': (NEW) ') . $sync_prd_fields['sync_prd_ref'] . ' ' . $sync_prd_fields['sync_prd_name_bg']);
-			
-			$sync_prd_result = $this->processSyncProduct($id_supplier, $sync_prd_fields, $current_product, $logger);
-			
+
+			$sync_prd_result = $this->processSyncProduct($id_supplier, $sync_prd_fields, $current_product, $logger, $key, $sync_products_cnt);
+
 			if (!$sync_prd_result) {
 				$logger->logError('Failed syncing product ' . $sync_prd_fields['sync_prd_ref']. ' ' . $sync_prd_fields['sync_prd_name']);
 			} else {
@@ -264,33 +265,36 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		return $xml_data;
 	}
 	
-	protected function processSyncProduct($id_supplier, $sync_prd_fields, $current_product, $logger) {
-		
+	protected function processSyncProduct($id_supplier, $sync_prd_fields, $current_product, $logger, $key, $sync_products_cnt) {
+
 		$result = false;
 		
 		$id_shop = (int)$this->context->shop->id;
 		
+		$logStatus = "";
+
 		if ($current_product != null) {
 			// Update existing product
 			// Price, Availability
-			
+
 			$isUpdated = false;
-			
+
 			// update price and availability
 			$p = new Product($current_product['id_product'], true, $this->id_lang);
-			
+			$p_attr = $current_product['pid_product_attribute'];
+
 			$prd_price = (double) $p->price;
-			$prd_quantity = (int) StockAvailable::getQuantityAvailableByProduct($p->id);
+			$prd_quantity = (int) StockAvailable::getQuantityAvailableByProduct($p->id, $p_attr);
 			
 			if ($prd_price != $sync_prd_fields['sync_prd_price']) {
-				$logger->logDebug('Updated price from ' . $prd_price . ' to ' . $sync_prd_fields['sync_prd_price']);
+				$logStatus .= 'Price ' . $prd_price . ' -> ' . $sync_prd_fields['sync_prd_price'] . ', ';
 				$p->price = $sync_prd_fields['sync_prd_price'];
 				$isUpdated = true;
 			}
-			
-			if($prd_quantity != $sync_prd_fields['sync_prd_quantity']) {
-				$logger->logDebug('Updated quantity from ' . $prd_quantity . ' to ' . $sync_prd_fields['sync_prd_quantity'] . ' for id_product ' . $p->id);
-				StockAvailable::setQuantity($p->id, null, $sync_prd_fields['sync_prd_quantity']);
+
+			if($prd_quantity != $sync_prd_fields['sync_prd_quantity']) {				
+				$logStatus .= 'Quantity ' . $prd_quantity . ' -> ' . $sync_prd_fields['sync_prd_quantity'] . ', ';
+				StockAvailable::setQuantity($p->id, $p_attr, $sync_prd_fields['sync_prd_quantity']);
 				$isUpdated = true;
 			}
 			
@@ -357,6 +361,14 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 			$result = 'I';
 		}
 		
+		if ($result == 'K') {
+			$logger->logDebug('Processed ' . ($key + 1) . ' of ' . $sync_products_cnt . ': [' . $result . '] ' . ($current_product != null ? '('. $current_product['id_product'] . ') ' : '(NEW) ')
+				. $sync_prd_fields['sync_prd_ref'] . ' ' . $sync_prd_fields['sync_prd_name_bg'] . ' (' . $logStatus . ')');
+		} else {
+			$logger->logInfo('Processed ' . ($key + 1) . ' of ' . $sync_products_cnt . ': [' . $result . '] ' . ($current_product != null ? '('. $current_product['id_product'] . ') ' : '(NEW) ')
+				. $sync_prd_fields['sync_prd_ref'] . ' ' . $sync_prd_fields['sync_prd_name_bg'] . ' (' . $logStatus . ')');
+		}
+
 		return $result;
 	}
 	
@@ -390,12 +402,16 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		if(!$result['sync_prd_ref']) {
 			$result['sync_prd_ref']           = (string) $sync_prd_xml_node->EAN;
 		}
-		
+
+//=======================================================================================================
 		if(!$result['sync_prd_ref']) {
-			$logger->logWarning('Missing ProductCode for: ' . $result['sync_prd_name_bg']);
-			return false;
+			$result['status'] = false;
+			$result['status_msg'] = 'Missing ProductCode for: ' . $result['sync_prd_name_bg'];
+			
+			return $result;
 		}
-		
+//=======================================================================================================
+
 		$result['sync_prd_ref']               = (string) trim($result['sync_prd_ref']);
 		$result['sync_prd_ref_key']           = (string) 'sr_'.$result['sync_prd_ref'];
 		
@@ -411,6 +427,8 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		//AdminSyncSuppliersController::getManufacturerIdByName($result['sync_prd_manufacturer_name'], $logger);
 		//return false;
 		
+		$result['status'] = true;
+		
 		return $result;
 	}
 	
@@ -423,29 +441,33 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		if(!$result['sync_prd_ref']) {
 			$result['sync_prd_ref']           = (string) $sync_prd_xml_node->ProductID;
 		}
-		
+
+//=======================================================================================================
 		if(!$result['sync_prd_ref']) {
-			$logger->logWarning('Missing ProductCode for: ' . $result['sync_prd_name_bg']);
-			return false;
+			$result['status'] = false;
+			$result['status_msg'] = 'Missing ProductCode for: ' . $result['sync_prd_name_bg'];
+			
+			return $result;
 		}
-		
+//=======================================================================================================
+
 		$result['sync_prd_ref']               = (string) trim($result['sync_prd_ref']);
 		$result['sync_prd_ref_key']           = (string) 'sr_'.$result['sync_prd_ref'];
 		$result['sync_prd_price']             = (double) $sync_prd_xml_node->ProductPrice;
 		$result['sync_prd_availability']      = (string) $sync_prd_xml_node->AvailabilityLabel;
 		
+		
+		if ((int) $sync_prd_xml_node->ProductQuantity > 10) {
+		    $result['sync_prd_quantity'] = (int) $sync_prd_xml_node->ProductQuantity;
+		} else {
+		    $result['sync_prd_quantity'] = 3;
+		}
+		
 		switch($result['sync_prd_availability']) {
 			case 'В НАЛИЧНОСТ':
-				$result['sync_prd_quantity'] = 99;
-				break;
-			case 'Low Quantity':
-				$result['sync_prd_quantity'] = 5;
-				break;
-			case 'Out of stock':
-				$result['sync_prd_quantity'] = 0;
+			case 'НА СКЛАД':
 				break;
 			default:
-				$result['sync_prd_quantity'] = 3;
 				$logger->logWarning('Unknown sync_prd_availability "'. $result['sync_prd_availability'] . '"');
 				break;
 		}
@@ -464,9 +486,19 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		//AdminSyncSuppliersController::getManufacturerIdByName($result['sync_prd_manufacturer_name'], $logger);
 		//return false;
 		
+		$result['status'] = true;
+		
 		return $result;
 	}
 	
+	/**
+	 * 
+	 * @param unknown $sync_prd_xml_node
+	 * @param unknown $logger
+	 * @return boolean|string[]|number[]|NULL[]|boolean[]
+	 *   array with the field values for the Moni suplier
+	 *   -3 in case the internet_code is missing
+	 */
 	protected function getFieldsForMoni($sync_prd_xml_node, $logger) {
 		$result = array();
 		
@@ -480,14 +512,19 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		if(!$result['sync_prd_ref']) {
 			$result['sync_prd_ref']           = (string) $sync_prd_xml_node->barcode;
 		}
-		
+
+//=======================================================================================================		
 		if(!$result['sync_prd_ref']) {
-			$logger->logWarning('Missing internet_code for: ' . $result['sync_prd_name_bg']);
-			return false;
+			
+		    $result['status'] = false;
+			$result['status_msg'] = 'Missing internet_code for: ' . $result['sync_prd_name_bg'];
+			
+			return $result;
 		} else {
 			$result['sync_prd_ref']           = trim($result['sync_prd_ref']);
 		}
-		
+//=======================================================================================================
+
 		$result['sync_prd_ref_key']           = (string) 'sr_'.$result['sync_prd_ref'];
 		$result['sync_prd_price']             = (double) $sync_prd_xml_node->retail_price_with_vat;
 		$result['sync_prd_availability']      = (string) $sync_prd_xml_node->availability;
@@ -497,13 +534,13 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 				$result['sync_prd_quantity'] = 99;
 				break;
 			case 'Low Quantity':
-				$result['sync_prd_quantity'] = 5;
+				$result['sync_prd_quantity'] = 3;
 				break;
 			case 'Out of stock':
 				$result['sync_prd_quantity'] = 0;
 				break;
 			default:
-				$result['sync_prd_quantity'] = 3;
+				$result['sync_prd_quantity'] = 5;
 				$logger->logWarning('Unknown sync_prd_availability "'. $result['sync_prd_availability'] . '"');
 				break;
 		}
@@ -558,6 +595,8 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		
 		//AdminSyncSuppliersController::getManufacturerIdByName($result['sync_prd_manufacturer_name'], $logger);
 		//return false;
+		
+		$result['status'] = true;
 		
 		return $result;
 	}
