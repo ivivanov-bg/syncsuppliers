@@ -180,61 +180,107 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		
 		$xml_data = $this->prepareXmlObject($xml_data_str, $logger);
 		
-		$sync_products = $xml_data->xpath($xpath_products);
+		$xml_products = $xml_data->xpath($xpath_products);
+		$xml_products_cnt = count($xml_products);
+		
+		$sync_products = $this->preprocess_Supplier($id_supplier, $xml_products, $logger);
 		$sync_products_cnt = count($sync_products);
 		
-		$logger->logInfo('Products to sync: '. $sync_products_cnt . ' for selector "' . $xpath_products . '"');
+		$logger->logInfo('Products to sync: '. $xml_products_cnt . ' for selector "' . $xpath_products . '".' . ' After preprocessing: ' . $sync_products_cnt);
 		
-		$products = Supplier::getProductsForSync($id_supplier, $this->id_lang, 1000000, 1);
+		$products = SupplierCore::getProductsForSync($id_supplier, $this->id_lang, 1000000, 1);
 		$products_cnt = count($products);
 		
 		$logger->logInfo("Products in database: ". $products_cnt . " for supplier " . $id_supplier . " with 'supplier_reference'");
 		
-		$I = 0; $U = 0; $D = 0; $K = 0;
+//		$logger->logInfo(json_encode($sync_products, JSON_UNESCAPED_UNICODE));
+		
 		foreach ($sync_products as $key => $sync_prd) {
-			
-			$sync_prd_fields = $this->getFieldsBySupplier($id_supplier, $sync_prd, $logger);
-			
-			if (!$sync_prd_fields['status']) {
-				$logger->logWarning('Skipping ' . ($key + 1) . ' of ' . $sync_products_cnt . ': ' . $sync_prd_fields['status_msg']);
-				continue;
-			} else if (!$sync_prd_fields) {
-				$logger->logWarning('Skipping ' . ($key + 1) . ' of ' . $sync_products_cnt . ': Product fields are empty');
-				continue;
+			foreach ($sync_prd as $k_fields => $v_fields) {
+				foreach ($v_fields as $sync_prd_fields) {
+					
+					if (isset($sync_prd_fields['sync_prd_ref_key']) && isset($products[$sync_prd_fields['sync_prd_ref_key']])) {
+						
+						$current_product_id = $products[$sync_prd_fields['sync_prd_ref_key']]['id_product'];
+						
+						if (isset($sync_products[$key]['parent_pid']) && $sync_products[$key]['parent_pid'] != $current_product_id) {
+							$logger->logInfo('Products id ('. $current_product_id . ') differes from expected (' . $sync_products[$key]['parent_pid'] . ')');
+						} else {
+							$sync_products[$key]['parent_pid'] = $current_product_id;
+						}
+					} else {
+						$current_product = null;
+					}
+				}
 			}
-			
-			if (isset($products[$sync_prd_fields['sync_prd_ref_key']])) {
-				$current_product = $products[$sync_prd_fields['sync_prd_ref_key']];
-			} else {
-				$current_product = null;
-			}
-			
-			if ($current_product == null && !$sync_prd_fields['sync_prd_insert_allowed']) {
-				$logger->logDebug('Skipping ' . ($key + 1) . ' of ' . $sync_products_cnt . ($current_product != null ? ': ' : ': (NEW) ') . $sync_prd_fields['sync_prd_ref'] . ' ' . $sync_prd_fields['sync_prd_name_bg']);
-				continue;
-			}
-
-			$sync_prd_result = $this->processSyncProduct($id_supplier, $sync_prd_fields, $current_product, $logger, $key, $sync_products_cnt);
-
-			if (!$sync_prd_result) {
-				$logger->logError('Failed syncing product ' . $sync_prd_fields['sync_prd_ref']. ' ' . $sync_prd_fields['sync_prd_name']);
-			} else {
-				switch ($sync_prd_result) {
-					case 'I': // Inserted
-						$I++;
-						break;
-					case 'U': // Updated
-						$U++;
-						break;
-					case 'K': // Kept
-						$K++;
-						break;
-					case 'D': // Deleted
-						$D++;
-						break;
-					default:
-						$logger->logWarning('Unknown sync result "' . $sync_prd_result .'"');
-						break;
+		}
+		
+//		$logger->logInfo(json_encode($sync_products, JSON_UNESCAPED_UNICODE));
+		
+		$I = 0; $U = 0; $D = 0; $K = 0; $current_key = 0;
+		foreach ($sync_products as $key => $sync_prd) {
+			foreach ($sync_prd as $k_fields => $v_fields) {
+				
+				if ($k_fields != 'data') {
+					continue;
+				}
+				
+				if (!is_array($v_fields)) {
+					$logger->logWarning('Invalid field: ' . json_encode($sync_prd, JSON_UNESCAPED_UNICODE));
+					continue;
+				}
+				
+				foreach ($v_fields as $key2 => $sync_prd_fields) {
+					
+					if (isset($sync_prd['parent_pid'])) {
+						$sync_prd_fields['parent_pid'] = $sync_prd['parent_pid'];
+					} else {
+						$sync_prd_fields['parent_pid'] = null;
+					}
+					$current_key += 1;
+				
+					if (!$sync_prd_fields['status']) {
+						$logger->logWarning('Skipping ' . $current_key . ' of ' . $xml_products_cnt . ': ' . $sync_prd_fields['status_msg']);
+						continue;
+					} else if (!$sync_prd_fields) {
+						$logger->logWarning('Skipping ' . $current_key . ' of ' . $xml_products_cnt . ': Product fields are empty');
+						continue;
+					}
+					
+					if (isset($products[$sync_prd_fields['sync_prd_ref_key']])) {
+						$current_product = $products[$sync_prd_fields['sync_prd_ref_key']];
+					} else {
+						$current_product = null;
+					}
+					
+					if (($current_product == null && $sync_prd_fields['parent_pid'] == null) && !$sync_prd_fields['sync_prd_insert_allowed']) {
+						$logger->logDebug('Skipping ' . $current_key . ' of ' . $xml_products_cnt . ($sync_prd_fields['parent_pid'] != null ? ': (NEW ATTR) ' : ': (NEW) ') . $sync_prd_fields['sync_prd_ref'] . ' ' . $sync_prd_fields['sync_prd_name_bg']);
+						continue;
+					}
+					
+					$sync_prd_result = $this->processSyncProduct($id_supplier, $sync_prd_fields, $current_product, $logger, $current_key, $xml_products_cnt);
+					
+					if (!$sync_prd_result) {
+						$logger->logError('Failed syncing product ' . $sync_prd_fields['sync_prd_ref']. ' ' . $sync_prd_fields['sync_prd_name']);
+					} else {
+						switch ($sync_prd_result) {
+							case 'I': // Inserted
+								$I++;
+								break;
+							case 'U': // Updated
+								$U++;
+								break;
+							case 'K': // Kept
+								$K++;
+								break;
+							case 'D': // Deleted
+								$D++;
+								break;
+							default:
+								$logger->logWarning('Unknown sync result "' . $sync_prd_result .'"');
+								break;
+						}
+					}
 				}
 			}
 		}
@@ -272,19 +318,61 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		$id_shop = (int)$this->context->shop->id;
 		
 		$logStatus = "";
-
+		
+		if (isset($sync_prd_fields['attr_color'])) {
+			$p_attr_color_expected = $sync_prd_fields['attr_color'];
+		} else {
+			$p_attr_color_expected = 0;
+		}
+		
+		$prd_id = 0;
+		
 		if ($current_product != null) {
+			$prd_id = $current_product['id_product'];
+		} else if ($sync_prd_fields['parent_pid'] != null) {
+			$prd_id = $sync_prd_fields['parent_pid'];
+		} else {
+			$prd_id = 0;
+		}
+		
+
+		if ($prd_id != 0) {
+			
 			// Update existing product
 			// Price, Availability
 
 			$isUpdated = false;
 
 			// update price and availability
-			$p = new Product($current_product['id_product'], true, $this->id_lang);
+			$p = new Product($prd_id, true, $this->id_lang);
 			$p_attr = $current_product['pid_product_attribute'];
-
+			$p_attr_color = $current_product['color_code'];
+			
 			$prd_price = (double) $p->price;
 			$prd_quantity = (int) StockAvailable::getQuantityAvailableByProduct($p->id, $p_attr);
+			
+			if ($p_attr_color_expected != $p_attr_color) {
+				$logStatus .= 'Expected attribute: ' . $p_attr_color_expected . ', but actual is: ' . $p_attr_color . ', ';
+				
+				$combinationAttributes[] = $p_attr_color_expected;
+				
+				if(!$p->productAttributeExists($combinationAttributes)) {
+					$id_product_attribute = $p->addCombinationEntity(0, 0, 0, '', 0, 0, null, '', $id_supplier, '', (isset($p_attr_color) && $p_attr_color == 0));
+					$combination = new Combination((int)$id_product_attribute);
+					
+					$combination->setAttributes($combinationAttributes);
+					
+					$combination->save();
+					
+					$p->price = $prd_price;
+					$p->supplier_reference = '';
+					$p->addSupplierReference($id_supplier, 0, '');
+					$p->addSupplierReference($id_supplier, $id_product_attribute, $sync_prd_fields['sync_prd_ref']);
+					$p->save();
+					
+					$p_attr = $id_product_attribute;
+				}
+			}
 			
 			if ($prd_price != $sync_prd_fields['sync_prd_price']) {
 				$logStatus .= 'Price ' . $prd_price . ' -> ' . $sync_prd_fields['sync_prd_price'] . ', ';
@@ -304,8 +392,9 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 			} else {
 				$result = 'K';
 			}
+
 		} else {
-			$p = new Product(0, false);
+			$p = new Product($prd_id, false);
 			
 			$p->id_supplier         = $id_supplier;
 			$p->supplier_reference  = $sync_prd_fields['sync_prd_ref'];
@@ -322,9 +411,28 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 			$p->save();
 			
 			$p->updateCategories(array(2));
-			$p->addSupplierReference($id_supplier, 0, $sync_prd_fields['sync_prd_ref']);
 			$p->setAdvancedStockManagement(1);
-			StockAvailable::setQuantity($p->id, null, $sync_prd_fields['sync_prd_quantity']);
+			
+			if($p_attr_color_expected == 0) {
+				$p->addSupplierReference($id_supplier, null, $sync_prd_fields['sync_prd_ref']);
+				StockAvailable::setQuantity($p->id, null, $sync_prd_fields['sync_prd_quantity']);
+			} else {
+				$combinationAttributes[] = $p_attr_color_expected;
+				
+				if(!$p->productAttributeExists($combinationAttributes)) {
+					$id_product_attribute = $p->addCombinationEntity(0, 0, 0, '', 0, 0, null, '', $id_supplier, '', false);
+					$combination = new CombinationCore((int)$id_product_attribute);
+					
+					$combination->setAttributes($combinationAttributes);
+					
+					$combination->save();
+					
+					$p->addSupplierReference($id_supplier, $id_product_attribute, $sync_prd_fields['sync_prd_ref']);
+					StockAvailable::setQuantity($p->id, $id_product_attribute, $sync_prd_fields['sync_prd_quantity']);
+				}
+			}
+			
+			$p->save();
 			
 			
 			$has_cover = false;
@@ -362,17 +470,17 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		}
 		
 		if ($result == 'K') {
-			$logger->logDebug('Processed ' . ($key + 1) . ' of ' . $sync_products_cnt . ': [' . $result . '] ' . ($current_product != null ? '('. $current_product['id_product'] . ') ' : '(NEW) ')
+			$logger->logDebug('Processed ' . ($key) . ' of ' . $sync_products_cnt . ': [' . $result . '] ' . ($prd_id != 0 ? '('. $prd_id . ') ' : '(NEW) ')
 				. $sync_prd_fields['sync_prd_ref'] . ' ' . $sync_prd_fields['sync_prd_name_bg'] . ' (' . $logStatus . ')');
 		} else {
-			$logger->logInfo('Processed ' . ($key + 1) . ' of ' . $sync_products_cnt . ': [' . $result . '] ' . ($current_product != null ? '('. $current_product['id_product'] . ') ' : '(NEW) ')
+			$logger->logInfo('Processed ' . ($key) . ' of ' . $sync_products_cnt . ': [' . $result . '] ' . ($prd_id != 0 ? '('. $prd_id . ') ' : '(NEW) ')
 				. $sync_prd_fields['sync_prd_ref'] . ' ' . $sync_prd_fields['sync_prd_name_bg'] . ' (' . $logStatus . ')');
 		}
 
 		return $result;
 	}
 	
-	protected function getFieldsBySupplier($id_supplier, $sync_prd_xml_node, $logger) {
+	protected function getFields_Supplier($id_supplier, $sync_prd_xml_node, $logger) {
 		$result = null;
 		
 		switch($id_supplier) {
@@ -384,6 +492,27 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 				break;
 			case 5: // Bright Toys
 				$result =  $this->getFieldsForBrightToys($sync_prd_xml_node, $logger);
+				break;
+			default:
+				$logger->logWarning('Unknown supplier id "'. $id_supplier . '"');
+				$result =  false;
+		}
+		
+		return $result;
+	}
+	
+	protected function preprocess_Supplier($id_supplier, $sync_products, $logger) {
+		$result = null;
+		
+		switch($id_supplier) {
+			case 2: // Moni
+				$result = $this->preprocessMoni($sync_products, $logger);
+				break;
+			case 4: // Mouse Toys
+				$result =  $this->preprocessMouseToys($sync_products, $logger);
+				break;
+			case 5: // Bright Toys
+				$result =  $this->preprocessBrightToys($sync_products, $logger);
 				break;
 			default:
 				$logger->logWarning('Unknown supplier id "'. $id_supplier . '"');
@@ -432,6 +561,27 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		return $result;
 	}
 	
+	protected function preprocessBrightToys($sync_products, $logger) {
+		$refined_products = array();
+		foreach($sync_products as $key => $sync_prd) {
+			
+			$sync_prd_fields = $this->getFieldsForBrightToys($sync_prd, $logger);
+			
+			// Adjust the map key based on the attributes ====================================
+			$sync_prd_attr_key = $sync_prd_fields['sync_prd_name_bg'];
+			// ===============================================================================
+			
+			if (!$refined_products[$sync_prd_attr_key]) {
+				$refined_products[$sync_prd_attr_key] = array();
+				$refined_products[$sync_prd_attr_key]['data'] = array();
+			}
+
+			array_push($refined_products[$sync_prd_attr_key]['data'], $sync_prd_fields);
+		}
+
+		return $refined_products;
+	}
+	
 	protected function getFieldsForMouseToys($sync_prd_xml_node, $logger) {
 		$result = array();
 		
@@ -458,9 +608,9 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		
 		
 		if ((int) $sync_prd_xml_node->ProductQuantity > 10) {
-		    $result['sync_prd_quantity'] = (int) $sync_prd_xml_node->ProductQuantity;
+			$result['sync_prd_quantity'] = (int) $sync_prd_xml_node->ProductQuantity;
 		} else {
-		    $result['sync_prd_quantity'] = 3;
+			$result['sync_prd_quantity'] = 3;
 		}
 		
 		switch($result['sync_prd_availability']) {
@@ -491,6 +641,27 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		return $result;
 	}
 	
+	protected function preprocessMouseToys($sync_products, $logger) {
+		$refined_products = array();
+		foreach($sync_products as $key => $sync_prd) {
+			
+			$sync_prd_fields = $this->getFieldsForMouseToys($sync_prd, $logger);
+			
+			// Adjust the map key based on the attributes ====================================
+			$sync_prd_attr_key = $sync_prd_fields['sync_prd_name_bg'];
+			// ===============================================================================
+			
+			if (!$refined_products[$sync_prd_attr_key]) {
+				$refined_products[$sync_prd_attr_key] = array();
+				$refined_products[$sync_prd_attr_key]['data'] = array();
+			}
+
+			array_push($refined_products[$sync_prd_attr_key]['data'], $sync_prd_fields);
+		}
+
+		return $refined_products;
+	}
+	
 	/**
 	 * 
 	 * @param unknown $sync_prd_xml_node
@@ -513,10 +684,11 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 			$result['sync_prd_ref']           = (string) $sync_prd_xml_node->barcode;
 		}
 
+		$result['sync_prd_barcode']           = (string) $sync_prd_xml_node->barcode;
 //=======================================================================================================		
 		if(!$result['sync_prd_ref']) {
 			
-		    $result['status'] = false;
+			$result['status'] = false;
 			$result['status_msg'] = 'Missing internet_code for: ' . $result['sync_prd_name_bg'];
 			
 			return $result;
@@ -599,6 +771,59 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		$result['status'] = true;
 		
 		return $result;
+	}
+	
+	protected function preprocessMoni($sync_products, $logger) {
+		// preprocess data to group the same items with different attributes:
+		// color, size
+		$attr_color = array();
+		$attr_color[16] = '/ бежов/i';
+		$attr_color[20] = '/ бял/i';
+		$attr_color[27] = '/ деним/i';
+		$attr_color[22] = '/ жълт/i';
+		$attr_color[18] = '/ зелен/i';
+		$attr_color[10] = '/ капучино/i';
+		$attr_color[17] = '/ кафяв/i';
+		$attr_color[8]  = '/ лилав/i';
+		$attr_color[25] = '/ ментов/i';
+		$attr_color[21] = '/ оранжев/i';
+		$attr_color[5]  = '/ (розов|роз)/i';
+		$attr_color[24] = '/ светлобежов/i';
+		$attr_color[24] = '/ светлосив/i';
+		$attr_color[28] = '/ светлосин/i';
+		$attr_color[11] = '/ сив/i';
+		$attr_color[6]  = '/ син/i';
+		$attr_color[23] = '/ тъмносив/i';
+		$attr_color[9]  = '/ (тюркоаз|тюрк)/i';
+		$attr_color[7]  = '/ червен/i';
+		$attr_color[12] = '/ черен/i';
+		
+		$refined_products = array();
+		
+		foreach($sync_products as $key => $sync_prd) {
+
+			$sync_prd_fields = $this->getFieldsForMoni($sync_prd, $logger);
+			
+			// Adjust the map key based on the attributes ====================================
+			$sync_prd_attr_key = $sync_prd_fields['sync_prd_name_bg'];
+			foreach($attr_color as $ak => $av) {
+				if (preg_match($av, $sync_prd_attr_key)) {
+					$sync_prd_attr_key = preg_replace($av, ' color_attr',  $sync_prd_attr_key);
+					$sync_prd_fields['attr_color'] = $ak;
+					break;
+				}
+			}
+			// ===============================================================================
+			
+			if (!isset($refined_products[$sync_prd_attr_key])) {
+				$refined_products[$sync_prd_attr_key] = array();
+				$refined_products[$sync_prd_attr_key]['data'] = array();
+			}
+			
+			array_push($refined_products[$sync_prd_attr_key]['data'], $sync_prd_fields);
+		}
+		
+		return $refined_products;
 	}
 	
 	public static function getManufacturerIdByName($name, $logger)
