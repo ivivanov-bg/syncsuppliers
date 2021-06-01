@@ -183,6 +183,7 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		$xml_products = $xml_data->xpath($xpath_products);
 		$xml_products_cnt = count($xml_products);
 		
+		// preprocess the XML data. Group same products with different combinations
 		$sync_products = $this->preprocess_Supplier($id_supplier, $xml_products, $logger);
 		$sync_products_cnt = count($sync_products);
 		
@@ -193,10 +194,13 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		
 		$logger->logInfo("Products in database: ". $products_cnt . " for supplier " . $id_supplier . " with 'supplier_reference'");
 		
-//		$logger->logInfo(json_encode($sync_products, JSON_UNESCAPED_UNICODE));
+//		$logger->logInfo(json_encode($products, JSON_UNESCAPED_UNICODE));
 		
+		// Itterate over the combined product
 		foreach ($sync_products as $key => $sync_prd) {
+			// Itterate over each product in the source data ??? 
 			foreach ($sync_prd as $k_fields => $v_fields) {
+				// Get the actual product from the XML
 				foreach ($v_fields as $sync_prd_fields) {
 					
 					if (isset($sync_prd_fields['sync_prd_ref_key']) && isset($products[$sync_prd_fields['sync_prd_ref_key']])) {
@@ -216,6 +220,9 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		}
 		
 //		$logger->logInfo(json_encode($sync_products, JSON_UNESCAPED_UNICODE));
+
+		// store all processed product keys
+		$processed_product_keys = array();
 		
 		$I = 0; $U = 0; $D = 0; $K = 0; $current_key = 0;
 		foreach ($sync_products as $key => $sync_prd) {
@@ -249,6 +256,9 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 					
 					if (isset($products[$sync_prd_fields['sync_prd_ref_key']])) {
 						$current_product = $products[$sync_prd_fields['sync_prd_ref_key']];
+						
+						// store the refKey in the processed products array
+						array_push($processed_product_keys, $current_product['id_product']);
 					} else {
 						$current_product = null;
 					}
@@ -281,6 +291,31 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 								break;
 						}
 					}
+				}
+			}
+		}
+		
+		$missing_products_cnt = $products_cnt - count($processed_product_keys);
+		$i = 0;
+		// process all products which are missing in the source data
+		foreach ($products as $k => $current_product) {
+			if (!in_array($current_product['id_product'], $processed_product_keys)) {
+				
+				$prd_id = $current_product['id_product'];
+				$p_attr = $current_product['pid_product_attribute'];
+				
+				$prd_quantity = (int) StockAvailable::getQuantityAvailableByProduct($prd_id, $p_attr);
+				
+				if ($prd_quantity != 0) {
+					StockAvailable::setQuantity($prd_id, $p_attr, 0);
+					
+					$logger->logInfo('Processed ' . (++$i) . ' of ' . $missing_products_cnt . ': [D] ('. $prd_id . ') '
+						. $current_product['supplier_ref'] . ' ' . $current_product['name'] . ' (Quantity ' . $prd_quantity . ' -> 0)');
+					$D++;
+				} else {
+					$logger->logInfo('Processed ' . (++$i) . ' of ' . $missing_products_cnt . ': [K] ('. $prd_id . ') '
+						. $current_product['supplier_ref'] . ' ' . $current_product['name']);
+					$K++;
 				}
 			}
 		}
