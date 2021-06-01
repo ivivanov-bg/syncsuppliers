@@ -183,6 +183,11 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		$xml_products = $xml_data->xpath($xpath_products);
 		$xml_products_cnt = count($xml_products);
 		
+		if ($xml_products_cnt == 0) {
+		    $logger->logWarning('No products found. Skipping update.');
+		    return;
+		}
+		
 		// preprocess the XML data. Group same products with different combinations
 		$sync_products = $this->preprocess_Supplier($id_supplier, $xml_products, $logger);
 		$sync_products_cnt = count($sync_products);
