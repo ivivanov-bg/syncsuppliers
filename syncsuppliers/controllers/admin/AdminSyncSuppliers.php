@@ -608,7 +608,7 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 			$sync_prd_fields = $this->getFieldsForBrightToys($sync_prd, $logger);
 			
 			// Adjust the map key based on the attributes ====================================
-			$sync_prd_attr_key = $sync_prd_fields['sync_prd_name_bg'];
+			$sync_prd_attr_key = $sync_prd_fields['sync_prd_ref'];
 			// ===============================================================================
 			
 			if (!$refined_products[$sync_prd_attr_key]) {
@@ -688,7 +688,7 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 			$sync_prd_fields = $this->getFieldsForMouseToys($sync_prd, $logger);
 			
 			// Adjust the map key based on the attributes ====================================
-			$sync_prd_attr_key = $sync_prd_fields['sync_prd_name_bg'];
+			$sync_prd_attr_key = $sync_prd_fields['sync_prd_ref'];
 			// ===============================================================================
 			
 			if (!$refined_products[$sync_prd_attr_key]) {
