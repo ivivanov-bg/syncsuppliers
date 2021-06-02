@@ -1,5 +1,10 @@
 #!/bin/bash
 
+if [[ -z ${SMEHURKO_USER} || -z ${SMEHURKO_PASS} ]]; then
+  echo "Missing credentials SMEHURKO_USER and SMEHURKO_PASS"
+  exit 1
+fi
+
 URL="https://smehurko.com/admins"
 
 
@@ -9,8 +14,8 @@ URL_PATH=$(curl -L -s -k -c cookies.txt \
      -F 'token=' \
      -F 'controller=AdminLogin' \
      -F 'submitLogin=1' \
-     -F 'passwd=!SladoleD88!' \
-     -F 'email=admin@smehurko.com' \
+     -F "passwd=${SMEHURKO_PASS}" \
+     -F "email=${SMEHURKO_USER}" \
      -F 'redirect=AdminSyncSuppliers' \
      ${URL}/ajax-tab.php?rand=1618680841014 \
      | jq -r '.redirect'
