@@ -1,0 +1,2 @@
+Sync complete. Result:
+{sync_result}

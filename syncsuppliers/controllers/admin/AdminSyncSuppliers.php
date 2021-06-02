@@ -165,6 +165,7 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 	
 	protected function syncProducts($id_supplier, $xml_feed_url, $xpath_products, $log_filename, $log_debug_lvl = 1) {
 		
+		unlink($log_filename);
 		$logger = new FileLogger($log_debug_lvl);
 		$logger->setFilename($log_filename);
 		
@@ -180,11 +181,17 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		
 		$xml_data = $this->prepareXmlObject($xml_data_str, $logger);
 		
-		$xml_products = $xml_data->xpath($xpath_products);
-		$xml_products_cnt = count($xml_products);
+		if ($xml_data != false) {
+		    $xml_products = $xml_data->xpath($xpath_products);
+		    $xml_products_cnt = count($xml_products);
+		} else {
+		    $xml_products = null;
+		    $xml_products_cnt = 0;
+		}
 		
 		if ($xml_products_cnt == 0) {
 			$logger->logWarning('No products found. Skipping update.');
+			$this->sendResultMail('Sync Failed - No products for id ' . $id_supplier, 'No products found. Skipping update.', $log_filename);
 			return;
 		}
 		
@@ -328,6 +335,19 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		$this->submit_result = $id_supplier . ':I=' . $I . ':U=' . $U . ':D=' . $D . ':K=' . $K;
 		$this->submit_result_data = '';
 		$logger->logInfo($this->submit_result);
+
+		$this->sendResultMail('Sync Complete for id ' . $id_supplier, $this->submit_result, $log_filename);
+	}
+	
+	protected function sendResultMail($title, $sync_result, $attachment_filename) {
+		$file_attachment = array();
+		$file_attachment['content'] = file_get_contents($attachment_filename);
+		$file_attachment['name'] = substr($attachment_filename, strrpos($attachment_filename, '/') + 1);
+		$file_attachment['mime'] = 'text/plain';
+		
+		Mail::Send($this->id_lang, 'sync_complete', $title, array(
+			'{sync_result}' => $sync_result
+		), 'ivivanov.bg@gmail.com', null, null, null, $file_attachment);
 	}
 	
 	protected function prepareXmlObject($xml_data_str, $logger) {
@@ -335,17 +355,17 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		
 		if (!$xml_data) {
 			$logger->logError('Failed loading file "'. $xml_data_str . '"');
-		}
-		
-		$logger->logDebug('Found '. count($xml_data) . ' Nodes in XML.');
-		
-		foreach ($xml_data->getNamespaces(true) as $key => $value) {
-			if (!$key) {
-				$key = 'df';
-			}
-			
-			$logger->logInfo('Found XML schema: "'. $key . '=' . $value .'"');
-			$xml_data->registerXPathNamespace($key, $value);
+		} else {
+    		$logger->logDebug('Found '. count($xml_data) . ' Nodes in XML.');
+    		
+    		foreach ($xml_data->getNamespaces(true) as $key => $value) {
+    			if (!$key) {
+    				$key = 'df';
+    			}
+    			
+    			$logger->logInfo('Found XML schema: "'. $key . '=' . $value .'"');
+    			$xml_data->registerXPathNamespace($key, $value);
+    		}
 		}
 		
 		return $xml_data;
