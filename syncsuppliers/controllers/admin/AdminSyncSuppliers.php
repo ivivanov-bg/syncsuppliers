@@ -184,8 +184,8 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		$xml_products_cnt = count($xml_products);
 		
 		if ($xml_products_cnt == 0) {
-		    $logger->logWarning('No products found. Skipping update.');
-		    return;
+			$logger->logWarning('No products found. Skipping update.');
+			return;
 		}
 		
 		// preprocess the XML data. Group same products with different combinations
@@ -423,6 +423,12 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 			if($prd_quantity != $sync_prd_fields['sync_prd_quantity']) {				
 				$logStatus .= 'Quantity ' . $prd_quantity . ' -> ' . $sync_prd_fields['sync_prd_quantity'] . ', ';
 				StockAvailable::setQuantity($p->id, $p_attr, $sync_prd_fields['sync_prd_quantity']);
+				
+				if (isset($p_attr) && $p_attr > 0 && $sync_prd_fields['sync_prd_quantity'] > 0) {
+					$p->deleteDefaultAttributes();
+					$p->setDefaultAttribute($p_attr);
+				}
+				
 				$isUpdated = true;
 			}
 			
