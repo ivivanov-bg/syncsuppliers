@@ -14,6 +14,7 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 	
 	private $submit_result = null;
 	private $submit_result_data = null;
+	private $allowed_ref_to_insert = array();
 
 	public function __construct()
 	{
@@ -135,6 +136,15 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		$xml_feed_url = Tools::getValue('feed_url');
 		$id_supplier = Tools::getValue('supplier');
 		$log_lvl = Tools::getValue('log_lvl');
+		
+		$insertIds = Tools::getValue('insert_ids');
+		
+		if (isset($insertIds)) {
+			$to_insert = explode(',', $insertIds);
+			if (is_array($to_insert)) {
+				$this->allowed_ref_to_insert = $to_insert;
+			}
+		}
 		
 		if (Tools::isSubmit('syncMoni')) {
 			$id_supplier   = 2;
@@ -861,6 +871,8 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		}
 //=======================================================================================================
 
+		$result['sync_prd_insert_allowed']           = in_array($result['sync_prd_ref'], $this->allowed_ref_to_insert);
+
 		$result['sync_prd_ref_key']           = (string) 'sr_'.$result['sync_prd_ref'];
 		$result['sync_prd_price']             = (double) $sync_prd_xml_node->retail_price_with_vat;
 		$result['sync_prd_availability']      = (string) $sync_prd_xml_node->availability;
@@ -885,11 +897,51 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 			case '1.КЕНГУРА И КОЛАНИ ЗА ПРОХОЖДАНЕ':
 				$result['sync_prd_category'] = 32; // Проходилки, слайдери и др.
 				break;
+			case '1.Текстил ОДЕЯЛО':
+			case '1.Текстил СПАЛЕН К-КТ':
+				$result['sync_prd_category'] = 60; // За детската стая -> Спални комплекти и одеяла
+				break;
+			case '1.Текстил РЪКАВИЦА':
+			case '1.Текстил ШАПКИ':
+				$result['sync_prd_category'] = 15; // Дрешки 
+				break;
 			case '2.ИГРАЧКИ ЗА ПЯСЪК И ТРЕВА':
+			case '4.ТОПКИ ЗА ИГРА':
 				$result['sync_prd_category'] = 34; // Активни игри и съоръжения -> Игра на открито
+				break;
+			case '2.ИГРАЧКИ КОНСТРУКТОР':
+				$result['sync_prd_category'] = 35; // Играчки -> Конструктори 
+				break;
+			case '1.Текстил ХАВЛИИ':
+			case '11.Аксесоари баня':
+			case '11.Подложки за вана':
+				$result['sync_prd_category'] = 7; // За банята
+				break;
+			case '11.Аспиратор за нос':
+				$result['sync_prd_category'] = 14; // За дома и семейството 
+				break;
+			case 'Акум. бъги':
+			case 'Акум. джип':
+			case 'Акум. коли':
+			case 'Акум. мотор':
+			case 'Акум. трактор':
+				$result['sync_prd_category'] = 26; // Активни игри и съоръжения -> Електрически колички
+				break;
+			case 'ЛЮЛЕЕЩИ ИГРАЧКИ':
+			case 'Навън ЛЮЛКА':
+				$result['sync_prd_category'] = 55; // Активни игри и съоръжения -> Люлки 
+				break;
+			case 'ЛЮЛКА И ШЕЗЛОНГИ':
+				$result['sync_prd_category'] = 22; // За детската стая -> Шезлонги и люлки
+				break;
+			case 'СПОРТНИ - ТРОТИНЕТКА':
+				$result['sync_prd_category'] = 48; // Активни игри и съоръжения -> Колела и тротинетки 
 				break;
 			default:
 				$result['sync_prd_category'] = 2; // Products 
+				if ($result['sync_prd_insert_allowed']) {
+					$logger->logWarning('Unknown category "'. $sync_prd_xml_node->group . '" using default 2');
+				}
 				break;
 		}
 		
@@ -938,9 +990,6 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		
 		//	            $result['sync_prd_description_en']    = (string) ($sync_prd_xml_node->xpath('characteristics/characteristic[@externalCode="231"]')[0]);
 		//	            $result['sync_prd_name_en']           = (string) ($sync_prd_xml_node->xpath('characteristics/characteristic[@externalCode=233]')[0]);
-		
-		$allowed_ref_to_insert = array(); // '106351', '107284', '107107'
-		$result['sync_prd_insert_allowed']           = in_array($result['sync_prd_ref'], $allowed_ref_to_insert);
 		
 		//AdminSyncSuppliersController::getManufacturerIdByName($result['sync_prd_manufacturer_name'], $logger);
 		//return false;
