@@ -881,9 +881,7 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 			case 'In stock':
 				$result['sync_prd_quantity'] = 99;
 				break;
-			case 'Low Quantity':
-				$result['sync_prd_quantity'] = 3;
-				break;
+			case 'Low Quantity': // treat low quantity as out of stock
 			case 'Out of stock':
 				$result['sync_prd_quantity'] = 0;
 				break;
