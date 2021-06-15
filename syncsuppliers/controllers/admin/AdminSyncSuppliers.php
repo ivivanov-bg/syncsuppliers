@@ -1025,6 +1025,7 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		$attr_color[30] = '/ тъмносин/i';
 		$attr_color[32] = '/ тъмночервен/i';
 		$attr_color[9]  = '/ (тюркоаз|тюрк)/i';
+		$attr_color[35] = '/ цветен/i';
 		$attr_color[7]  = '/ (червен|червена)/i';
 		$attr_color[12] = '/ черен/i';
 		
