@@ -294,7 +294,7 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 						continue;
 					}
 					
-					$sync_prd_result = $this->processSyncProduct($id_supplier, $sync_prd_fields, $current_product, $logger, $current_key, $xml_products_cnt);
+/* Actual SYNC*/	$sync_prd_result = $this->processSyncProduct($id_supplier, $sync_prd_fields, $current_product, $logger, $current_key, $xml_products_cnt);
 					
 					if (!$sync_prd_result) {
 						$logger->logError('Failed syncing product ' . $sync_prd_fields['sync_prd_ref']. ' ' . $sync_prd_fields['sync_prd_name']);
@@ -455,8 +455,8 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 				}
 			}
 			
-			// Check price
-			if ($prd_price != $sync_prd_fields['sync_prd_price']) {
+			// Check price - only if > 0 and In Stock
+			if ($prd_price != $sync_prd_fields['sync_prd_price'] && $sync_prd_fields['sync_prd_price'] != 0 && $sync_prd_fields['sync_prd_quantity'] > 0) {
 				$logStatus .= 'Price ' . $prd_price . ' -> ' . $sync_prd_fields['sync_prd_price'] . ', ';
 				$p->price = $sync_prd_fields['sync_prd_price'];
 				$isUpdated = true;
@@ -1011,15 +1011,16 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		$attr_color[10] = '/ капучино/i';
 		$attr_color[17] = '/ кафяв/i';
 		$attr_color[8]  = '/ лилав/i';
-		$attr_color[25] = '/ ментов/i';
+		$attr_color[25] = '/ (ментов|мента)/i';
 		$attr_color[21] = '/ оранжев/i';
 		$attr_color[5]  = '/ (розов|роз|розова)/i';
-		$attr_color[24] = '/ светлобежов/i';
+		$attr_color[29] = '/ светлобежов/i';
 		$attr_color[24] = '/ светлосив/i';
 		$attr_color[28] = '/ светлосин/i';
+		$attr_color[26] = '/ светлорозов/i';
 		$attr_color[11] = '/ сив/i';
 		$attr_color[6]  = '/ (син|синя)/i';
-		$attr_color[23] = '/ тъмнозелен/i';
+		$attr_color[33] = '/ тъмнозелен/i';
 		$attr_color[23] = '/ тъмносив/i';
 		$attr_color[30] = '/ тъмносин/i';
 		$attr_color[32] = '/ тъмночервен/i';
