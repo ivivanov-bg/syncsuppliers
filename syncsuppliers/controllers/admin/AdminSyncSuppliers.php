@@ -897,7 +897,7 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 				break;
 			case '1.Текстил ОДЕЯЛО':
 			case '1.Текстил СПАЛЕН К-КТ':
-				$result['sync_prd_category'] = 60; // За детската стая -> Спални комплекти и одеяла
+				$result['sync_prd_category'] = 60; // Спални комплекти и одеяла (За детската стая -> )
 				break;
 			case '1.Текстил РЪКАВИЦА':
 			case '1.Текстил ШАПКИ':
@@ -905,10 +905,13 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 				break;
 			case '2.ИГРАЧКИ ЗА ПЯСЪК И ТРЕВА':
 			case '4.ТОПКИ ЗА ИГРА':
-				$result['sync_prd_category'] = 34; // Активни игри и съоръжения -> Игра на открито
+				$result['sync_prd_category'] = 34; // Игра на открито (Активни игри и съоръжения -> )
 				break;
 			case '2.ИГРАЧКИ КОНСТРУКТОР':
-				$result['sync_prd_category'] = 35; // Играчки -> Конструктори 
+				$result['sync_prd_category'] = 35; // Конструктори (Играчки -> )
+				break;
+			case '2.ДЪРВЕНИ':
+				$result['sync_prd_category'] = 23; // Дървени образователни играчки  (Играчки -> )
 				break;
 			case '1.Текстил ХАВЛИИ':
 			case '11.Аксесоари баня':
@@ -923,17 +926,17 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 			case 'Акум. коли':
 			case 'Акум. мотор':
 			case 'Акум. трактор':
-				$result['sync_prd_category'] = 26; // Активни игри и съоръжения -> Електрически колички
+				$result['sync_prd_category'] = 26; // Електрически колички (Активни игри и съоръжения -> )
 				break;
 			case 'ЛЮЛЕЕЩИ ИГРАЧКИ':
 			case 'Навън ЛЮЛКА':
-				$result['sync_prd_category'] = 55; // Активни игри и съоръжения -> Люлки 
+				$result['sync_prd_category'] = 55; // Люлки (Активни игри и съоръжения -> )
 				break;
 			case 'ЛЮЛКА И ШЕЗЛОНГИ':
-				$result['sync_prd_category'] = 22; // За детската стая -> Шезлонги и люлки
+				$result['sync_prd_category'] = 22; // Шезлонги и люлки (За детската стая -> )
 				break;
 			case 'СПОРТНИ - ТРОТИНЕТКА':
-				$result['sync_prd_category'] = 48; // Активни игри и съоръжения -> Колела и тротинетки 
+				$result['sync_prd_category'] = 48; // Колела и тротинетки (Активни игри и съоръжения -> )
 				break;
 			default:
 				$result['sync_prd_category'] = 2; // Products 
