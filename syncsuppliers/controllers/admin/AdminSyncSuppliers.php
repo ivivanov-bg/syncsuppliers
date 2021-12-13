@@ -260,41 +260,49 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 				}
 				
 				foreach ($v_fields as $key2 => $sync_prd_fields) {
+				    
+// 				    $logger->logError(json_encode($sync_prd_fields, JSON_UNESCAPED_UNICODE));
 					
-					if (isset($sync_prd['parent_pid'])) {
-						$sync_prd_fields['parent_pid'] = $sync_prd['parent_pid'];
-					} else {
-						$sync_prd_fields['parent_pid'] = null;
-					}
-					$current_key += 1;
-				
-					if (!$sync_prd_fields['status']) {
-						$logger->logWarning('Skipping ' . $current_key . ' of ' . $xml_products_cnt . ': ' . $sync_prd_fields['status_msg']);
-						continue;
-					} else if (!$sync_prd_fields) {
-						$logger->logWarning('Skipping ' . $current_key . ' of ' . $xml_products_cnt . ': Product fields are empty');
-						continue;
-					}
+				    try {
+    					if (isset($sync_prd['parent_pid'])) {
+    						$sync_prd_fields['parent_pid'] = $sync_prd['parent_pid'];
+    					} else {
+    						$sync_prd_fields['parent_pid'] = null;
+    					}
+    					$current_key += 1;
+    				
+    					if (!$sync_prd_fields['status']) {
+    						$logger->logWarning('Skipping ' . $current_key . ' of ' . $xml_products_cnt . ': ' . $sync_prd_fields['status_msg']);
+    						continue;
+    					} else if (!$sync_prd_fields) {
+    						$logger->logWarning('Skipping ' . $current_key . ' of ' . $xml_products_cnt . ': Product fields are empty');
+    						continue;
+    					}
+    					
+    					if (isset($products[$sync_prd_fields['sync_prd_ref_key']])) {
+    						$current_product = $products[$sync_prd_fields['sync_prd_ref_key']];
+    						
+    						// store the refKey in the processed products array
+    						array_push($processed_product_keys, $current_product['id_product']);
+    					} else {
+    						$current_product = null;
+    					}
+    					
+    					if (($current_product == null && $sync_prd_fields['parent_pid'] == null) && !$sync_prd_fields['sync_prd_insert_allowed']) {
+    						$logger->logDebug(
+    							'Skipping ' . $current_key . ' of ' . $xml_products_cnt . ($sync_prd_fields['parent_pid'] != null ? ': (NEW ATTR) ' : ': (NEW) ') 
+    							. $sync_prd_fields['sync_prd_ref'] . ' ' . $sync_prd_fields['sync_prd_name_bg'] 
+    							. ' (Price ' . $sync_prd_fields['sync_prd_price'] . ', Quantity ' . $sync_prd_fields['sync_prd_quantity'] . ')'
+    						);
+    						continue;
+    					}
 					
-					if (isset($products[$sync_prd_fields['sync_prd_ref_key']])) {
-						$current_product = $products[$sync_prd_fields['sync_prd_ref_key']];
-						
-						// store the refKey in the processed products array
-						array_push($processed_product_keys, $current_product['id_product']);
-					} else {
-						$current_product = null;
+/* Actual SYNC*/	    $sync_prd_result = $this->processSyncProduct($id_supplier, $sync_prd_fields, $current_product, $logger, $current_key, $xml_products_cnt);
+					} catch (Exception $e) {
+					    echo 'ERROR';
+					    $logger->logError('Caught exception: ' . $e->getMessage() .'\n"');
+					    $sync_prd_result = false;
 					}
-					
-					if (($current_product == null && $sync_prd_fields['parent_pid'] == null) && !$sync_prd_fields['sync_prd_insert_allowed']) {
-						$logger->logDebug(
-							'Skipping ' . $current_key . ' of ' . $xml_products_cnt . ($sync_prd_fields['parent_pid'] != null ? ': (NEW ATTR) ' : ': (NEW) ') 
-							. $sync_prd_fields['sync_prd_ref'] . ' ' . $sync_prd_fields['sync_prd_name_bg'] 
-							. ' (Price ' . $sync_prd_fields['sync_prd_price'] . ', Quantity ' . $sync_prd_fields['sync_prd_quantity'] . ')'
-						);
-						continue;
-					}
-					
-/* Actual SYNC*/	$sync_prd_result = $this->processSyncProduct($id_supplier, $sync_prd_fields, $current_product, $logger, $current_key, $xml_products_cnt);
 					
 					if (!$sync_prd_result) {
 						$logger->logError('Failed syncing product ' . $sync_prd_fields['sync_prd_ref']. ' ' . $sync_prd_fields['sync_prd_name']);
@@ -476,15 +484,17 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 				$isUpdated = true;
 			}
 			
+			$has_cover = Image::getCover($prd_id);
+			
 			// check if there is an image for this product combination and upload if not
-			if (isset($p_attr) && $p_attr > 0 && !Image::hasImages($this->id_lang, $prd_id, $p_attr)) {
+			if (isset($p_attr) && !Image::hasImages($this->id_lang, $prd_id, $p_attr)) {
 				
 				$logStatus .= 'Add images: ';
 				
 				$image_ids = array();
 				
 				$img_key = 0;
-				foreach ($sync_prd_fields['sync_prd_image_links'] as $image_link) {
+				foreach ($sync_prd_fields['sync_prd_image_links'] as $key => $image_link) {
 					$url = (string) $image_link;
 					$img_key++;
 					
@@ -496,7 +506,10 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 					$image->legend = $sync_prd_fields['sync_prd_name_bg'];
 					$image->id_product = $prd_id;
 					$image->position = Image::getHighestPosition($prd_id) + 1;
-					$image->cover = false;
+					if ($has_cover)
+					   $image->cover = false;
+					else
+					   $image->cover = true;
 					
 					if (($image->validateFields(false, true)) === true && ($image->validateFieldsLang(false, true)) === true && $image->add()) {
 						$image->associateTo($id_shop);
@@ -521,6 +534,26 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 				}
 			} else {
 				$logStatus .= 'Has images, ';
+			}
+			
+			$has_cover = Image::getCover($prd_id);
+			
+			if (!$has_cover) {
+
+			    $images = Image::getImages($this->id_lang, $prd_id);
+			    
+			    if (!empty($images)) {			        
+			        $img = new Image((int)(($images[0])['id_image']));
+			        $img->cover = 1;
+			        
+			        @unlink(_PS_TMP_IMG_DIR_.'product_'.(int)$img->id_product.'.jpg');
+			        @unlink(_PS_TMP_IMG_DIR_.'product_mini_'.(int)$img->id_product.'_'.$id_shop.'.jpg');
+			        
+			        $img->update();
+			        
+			        $logStatus .= 'Set cover image, ';
+			        $isUpdated = true;
+			    }
 			}
 			
 			if ($isUpdated) {
@@ -1006,7 +1039,7 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		$attr_color = array();
 		$attr_color[16] = '/ бежов/i';
 		$attr_color[20] = '/ бял/i';
-		$attr_color[27] = '/ деним/i';
+		$attr_color[27] = '/ (деним|дънков|дънки)/i';
 		$attr_color[22] = '/ жълт/i';
 		$attr_color[18] = '/ (зелен|зелена)/i';
 		$attr_color[31] = '/ златен/i';
@@ -1021,7 +1054,7 @@ class AdminSyncSuppliersController extends ModuleAdminController {
 		$attr_color[24] = '/ светлосив/i';
 		$attr_color[28] = '/ светлосин/i';
 		$attr_color[26] = '/ светлорозов/i';
-		$attr_color[11] = '/ (сив|сребрист|сиво)/i';
+		$attr_color[11] = '/ (сив|сребрист|сиво|св.сив)/i';
 		$attr_color[6]  = '/ (син|синя)/i';
 		$attr_color[33] = '/ тъмнозелен/i';
 		$attr_color[23] = '/ тъмносив/i';
